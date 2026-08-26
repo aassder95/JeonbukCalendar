@@ -12,10 +12,6 @@
   "executionApi": {
     "access": "MYSELF"
   },
-  "webapp": {
-    "executeAs": "USER_DEPLOYING",
-    "access": "MYSELF"
-  },
   "oauthScopes": [
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/script.external_request"

@@ -20,6 +20,8 @@ function syncJeonbuk() {
   if (fixtures.length === 0) throw new Error('ICS 일정이 0건이므로 동기화를 중단합니다.');
 
   const currentUids = new Set(fixtures.map(fixture => fixture.uid));
+  const managedEvents = listManagedEvents(calendar.id);
+  const managedEventsByUid = indexManagedEventsByUid(managedEvents);
 
   let created = 0;
   let updated = 0;
@@ -39,14 +41,10 @@ function syncJeonbuk() {
         },
       },
     };
-    const existing = Calendar.Events.list(calendar.id, {
-      iCalUID: fixture.uid,
-      maxResults: 1,
-      showDeleted: false,
-    }).items || [];
+    const existing = managedEventsByUid.get(fixture.uid);
 
-    if (existing.length > 0) {
-      Calendar.Events.update(event, calendar.id, existing[0].id, {
+    if (existing) {
+      Calendar.Events.update(event, calendar.id, existing.id, {
         eventLabelVersion: 1,
         sendUpdates: 'none',
       });
@@ -60,20 +58,13 @@ function syncJeonbuk() {
     }
   }
 
-  const deleted = deleteStaleEvents(calendar.id, currentUids);
+  const deleted = deleteStaleEvents(calendar.id, managedEvents, currentUids);
   console.log(`동기화 완료: 추가 ${created}건, 수정 ${updated}건, 삭제 ${deleted}건`);
   return { created, updated, deleted };
 }
 
-function doGet() {
-  const result = syncJeonbuk();
-  return ContentService
-    .createTextOutput(`전북현대 일정 동기화 완료\n추가 ${result.created}건\n수정 ${result.updated}건\n삭제 ${result.deleted}건`)
-    .setMimeType(ContentService.MimeType.TEXT);
-}
-
-function deleteStaleEvents(calendarId, currentUids) {
-  let deleted = 0;
+function listManagedEvents(calendarId) {
+  const events = [];
   let pageToken = null;
 
   do {
@@ -85,14 +76,36 @@ function deleteStaleEvents(calendarId, currentUids) {
     if (pageToken) options.pageToken = pageToken;
 
     const response = Calendar.Events.list(calendarId, options);
-    for (const event of response.items || []) {
-      if (currentUids.has(event.iCalUID)) continue;
-      Calendar.Events.remove(calendarId, event.id, { sendUpdates: 'none' });
-      deleted++;
-    }
+    events.push(...(response.items || []));
 
     pageToken = response.nextPageToken || null;
   } while (pageToken);
+
+  return events;
+}
+
+function indexManagedEventsByUid(events) {
+  const eventsByUid = new Map();
+
+  for (const event of events) {
+    if (!event.iCalUID) continue;
+    if (eventsByUid.has(event.iCalUID)) {
+      throw new Error(`Google Calendar에 같은 UID의 관리 일정이 여러 개 있습니다: ${event.iCalUID}`);
+    }
+    eventsByUid.set(event.iCalUID, event);
+  }
+
+  return eventsByUid;
+}
+
+function deleteStaleEvents(calendarId, managedEvents, currentUids) {
+  let deleted = 0;
+
+  for (const event of managedEvents) {
+    if (currentUids.has(event.iCalUID)) continue;
+    Calendar.Events.remove(calendarId, event.id, { sendUpdates: 'none' });
+    deleted++;
+  }
 
   return deleted;
 }
@@ -154,9 +167,18 @@ function findLabelName(text) {
 
 function parseIcs(ics) {
   const unfolded = ics.replace(/\r?\n[ \t]/g, '');
+  const trimmed = unfolded.trim();
+  if (!trimmed.startsWith('BEGIN:VCALENDAR') || !trimmed.endsWith('END:VCALENDAR')) {
+    throw new Error('ICS의 VCALENDAR 시작 또는 종료 표식이 올바르지 않습니다.');
+  }
   const blocks = unfolded.match(/BEGIN:VEVENT[\s\S]*?END:VEVENT/g) || [];
+  const eventStartCount = (unfolded.match(/(?:^|\r?\n)BEGIN:VEVENT(?:\r?\n|$)/g) || []).length;
+  const eventEndCount = (unfolded.match(/(?:^|\r?\n)END:VEVENT(?:\r?\n|$)/g) || []).length;
+  if (blocks.length !== eventStartCount || blocks.length !== eventEndCount) {
+    throw new Error('ICS의 VEVENT 시작 또는 종료 표식 수가 일치하지 않습니다.');
+  }
 
-  return blocks.map(block => {
+  const fixtures = blocks.map(block => {
     const startLine = getPropertyLine(block, 'DTSTART');
     const endLine = getPropertyLine(block, 'DTEND');
     return {
@@ -168,6 +190,23 @@ function parseIcs(ics) {
       end: parseIcsDate(endLine),
     };
   });
+
+  validateFixtureUids(fixtures);
+  return fixtures;
+}
+
+function validateFixtureUids(fixtures) {
+  const uids = new Set();
+
+  for (const fixture of fixtures) {
+    if (!fixture.uid.trim()) {
+      throw new Error('ICS 일정의 UID가 비어 있습니다.');
+    }
+    if (uids.has(fixture.uid)) {
+      throw new Error(`ICS에 같은 UID가 여러 번 있습니다: ${fixture.uid}`);
+    }
+    uids.add(fixture.uid);
+  }
 }
 
 function getPropertyLine(block, name) {

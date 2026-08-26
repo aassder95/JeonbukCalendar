@@ -49,6 +49,14 @@ Apps Script API는 배포된 버전을 실행한다. `apps-script/Code.gs` 또�
 
 명령줄 실행을 사용할 수 없는 비상 상황에는 Apps Script 편집기에서 `syncJeonbuk`를 직접 실행한다. 매일 실행하는 Apps Script 자동 트리거는 설치하지 않는다.
 
+### 로컬 검증
+
+Apps Script 코드를 변경한 뒤 아래 명령으로 ICS 파싱, 날짜 변환, UID 검증, 대회 라벨 판정 테스트를 실행한다.
+
+```powershell
+npm test
+```
+
 ## 업데이트 운영 규칙
 
 일정 업데이트 요청을 받으면 전북현대가 출전하는 대회만 아래 기준으로 관리한다.

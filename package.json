@@ -1,6 +1,7 @@
 {
   "scripts": {
-    "sync-calendar": "powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File ./sync-calendar.ps1"
+    "sync-calendar": "powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File ./sync-calendar.ps1",
+    "test": "node --test"
   },
   "devDependencies": {
     "@google/clasp": "3.4.0"
