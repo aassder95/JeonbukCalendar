@@ -7,7 +7,9 @@
 - `jeonbuk.ics`: 일정 원본. GitHub의 같은 파일을 갱신하고 Apps Script를 실행한다.
 - `apps-script/Code.gs`: Raw ICS를 읽어 Google Calendar의 `전북현대` 캘린더에 일정을 추가, 수정, 삭제하는 Apps Script 원본이다.
 - `apps-script/appsscript.json`: 시간대와 Google Calendar API v3 고급 서비스 설정이다.
-- `sync-calendar.cmd`: Apps Script 웹 앱을 열어 동기화를 실행하는 로컬 실행 파일이다.
+- `sync-calendar.cmd`: PowerShell 동기화 스크립트를 실행하고 성공 또는 실패 종료 코드를 반환한다.
+- `sync-calendar.ps1`: Apps Script API로 `syncJeonbuk`를 호출하고 추가, 수정, 삭제 건수를 검증한다.
+- `.clasp.json.example`: 로컬 전용 `.clasp.json` 설정 예시다.
 - Raw ICS URL: `https://raw.githubusercontent.com/aassder95/JeonbukCalendar/main/jeonbuk.ics`
 
 이 저장소의 `apps-script/Code.gs`를 Apps Script 웹 편집기의 `Code.gs`와 동일하게 유지한다. 일정 데이터만 바꿀 때는 `jeonbuk.ics`만 수정하면 된다.
@@ -18,29 +20,34 @@
 
 1. `jeonbuk.ics`를 최신 일정으로 수정한다.
 2. 변경 내용을 GitHub `main` 브랜치에 푸시한다.
-3. 푸시가 끝나면 저장소 루트의 `sync-calendar.cmd`를 더블클릭한다.
-4. 브라우저에 `전북현대 일정 동기화 완료`와 추가, 수정, 삭제 건수가 표시될 때까지 기다린다.
+3. 푸시가 끝나면 저장소 루트의 `sync-calendar.cmd`를 실행한다.
+4. 콘솔에 `전북현대 일정 동기화 완료`와 추가, 수정, 삭제 건수가 표시되는지 확인한다.
 5. Google Calendar를 새로고침하여 변경된 일정을 확인한다.
 
 > GitHub에 푸시하는 것만으로 Google Calendar가 변경되지는 않는다. 푸시 후 반드시 `sync-calendar.cmd`를 더블클릭해야 캘린더에 반영된다.
 
-첫 실행에서는 Apps Script 웹 앱 URL을 입력한다. URL은 Git에서 제외되는 `apps-script-web-app-url.txt`에 저장되며, 이후 실행부터는 다시 입력하지 않는다.
+### 명령줄 동기화 최초 설정
 
-### 웹 앱 최초 설정
+1. 저장소에서 `npm ci`를 실행한다.
+2. 개인 Google 계정의 Apps Script 프로젝트 `전북현대 일정 동기화`를 연다.
+3. 저장소의 `apps-script/Code.gs`와 `apps-script/appsscript.json`을 웹 편집기의 코드와 매니페스트에 반영하고 저장한다.
+4. Apps Script 프로젝트를 표준 Google Cloud 프로젝트에 연결하고 해당 프로젝트에서 Google Apps Script API를 활성화한다.
+5. Google Cloud에서 데스크톱 앱 유형 OAuth 클라이언트를 만들고 JSON 파일을 내려받는다.
+6. `.clasp.json.example`을 `.clasp.json`으로 복사하고 Apps Script ID와 Google Cloud 프로젝트 ID를 입력한다.
+7. 아래 명령으로 프로젝트 권한과 clasp 기본 권한을 한 번 승인한다.
 
-1. 개인 Google 계정의 Apps Script 프로젝트 `전북현대 일정 동기화`를 연다.
-2. 저장소의 `apps-script/Code.gs` 내용을 웹 편집기의 `Code.gs`에 반영하고 저장한다.
-3. `배포` → `새 배포`를 누르고 유형으로 `웹 앱`을 선택한다.
-4. 실행 사용자는 `나`, 액세스 사용자는 `나만`으로 설정한다.
-5. 배포하고 권한을 허용한 뒤 생성된 `/exec` 웹 앱 URL을 복사한다.
-6. `sync-calendar.cmd`를 더블클릭하고 URL을 한 번 입력한다.
-7. 처음 열린 전북현대 전용 Edge 프로필에서 Apps Script를 배포한 개인 Google 계정으로 로그인한다.
+   ```powershell
+   .\node_modules\.bin\clasp.cmd --project .\.clasp.json login --creds .\client_secret.json --use-project-scopes --include-clasp-scopes
+   ```
 
-웹 앱을 `모든 사용자`에게 공개하지 않는다. Google은 여러 계정에 동시에 로그인한 브라우저 프로필에서 Apps Script 웹 앱 사용을 지원하지 않으므로, `sync-calendar.cmd`는 `%LOCALAPPDATA%\JeonbukCalendar\EdgeProfile`의 독립 Edge 프로필을 사용한다. 최초 로그인 이후에는 같은 개인 계정 로그인 상태를 재사용한다.
+8. Apps Script 편집기에서 `배포` → `새 배포` → `API 실행 파일`을 선택하고 액세스 권한을 `나만`으로 배포한다.
+9. `sync-calendar.cmd`를 실행해 추가, 수정, 삭제 건수가 출력되는지 확인한다.
 
-웹 앱을 사용하지 못하는 경우에는 Apps Script 편집기에서 `syncJeonbuk`를 직접 실행할 수 있다. 매일 실행하는 자동 트리거는 설치하지 않는다.
+OAuth 클라이언트 JSON, `.clasp.json`, clasp 인증 정보는 Git에 커밋하지 않는다. 예약 실행은 최초 로그인에서 저장된 OAuth 갱신 토큰을 재사용하므로 브라우저 선택이나 로그인 입력을 요구하지 않는다.
 
-Apps Script 로직을 변경한 경우에는 저장소의 `apps-script/Code.gs` 내용을 Apps Script 웹 편집기의 `Code.gs`에도 반영하고 저장한 뒤 웹 앱 배포를 새 버전으로 갱신한다. GitHub에 푸시하는 것만으로 Apps Script 프로젝트 코드가 자동 배포되지는 않는다.
+Apps Script API는 배포된 버전을 실행한다. `apps-script/Code.gs` 또는 `apps-script/appsscript.json`을 변경했으면 웹 편집기에 반영하고 API 실행 파일을 새 버전으로 갱신한 뒤 사용한다. GitHub에 푸시하는 것만으로 Apps Script 프로젝트 코드가 자동 배포되지는 않는다.
+
+명령줄 실행을 사용할 수 없는 비상 상황에는 Apps Script 편집기에서 `syncJeonbuk`를 직접 실행한다. 매일 실행하는 Apps Script 자동 트리거는 설치하지 않는다.
 
 ## 업데이트 운영 규칙
 
@@ -93,4 +100,4 @@ Apps Script가 일정 제목과 설명의 대회명을 확인하여 이벤트별
 - Apps Script 고급 서비스: Google Calendar API v3 (`Calendar`)
 - Apps Script 시간대: `Asia/Seoul`
 - 자동 트리거: 사용하지 않음
-- 로컬 실행: `sync-calendar.cmd` → Apps Script 웹 앱 `doGet()`
+- 로컬 실행: `sync-calendar.cmd` → `sync-calendar.ps1` → Apps Script API `syncJeonbuk()`

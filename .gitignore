@@ -1,1 +1,6 @@
 apps-script-web-app-url.txt
+.clasp.json
+.clasprc*.json
+client_secret*.json
+oauth-client*.json
+node_modules/
