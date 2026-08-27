@@ -3,6 +3,9 @@
     "sync-calendar": "powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File ./sync-calendar.ps1",
     "test": "node --test"
   },
+  "engines": {
+    "node": ">=20"
+  },
   "devDependencies": {
     "@google/clasp": "3.4.0"
   }
