@@ -6,36 +6,167 @@
   <meta name="description" content="전북현대 경기 일정을 Google Calendar와 동기화하는 개인용 오픈소스 도구입니다.">
   <title>JeonbukCalendar</title>
   <style>
-    :root { color-scheme: light dark; font-family: system-ui, sans-serif; line-height: 1.65; }
-    body { max-width: 760px; margin: 0 auto; padding: 48px 24px; }
+    :root {
+      color-scheme: light dark;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.65;
+      --green: #08783e;
+      --green-strong: #046432;
+      --surface: #ffffff;
+      --soft: #f2f7f4;
+      --border: #d3e1d8;
+      --text: #17231c;
+      --muted: #526158;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--soft); color: var(--text); }
+    main, footer { width: min(880px, calc(100% - 40px)); margin-inline: auto; }
+    main { padding: 64px 0 24px; }
     h1, h2 { line-height: 1.25; }
-    a { color: #16804a; }
-    .card { padding: 20px; border: 1px solid #8a8a8a66; border-radius: 12px; }
-    footer { margin-top: 48px; font-size: 0.9rem; opacity: 0.8; }
+    h1 { margin: 0; font-size: clamp(2rem, 7vw, 3.5rem); letter-spacing: -0.04em; }
+    h2 { margin-top: 0; font-size: 1.25rem; }
+    a { color: var(--green-strong); }
+    .eyebrow { margin: 0 0 8px; color: var(--green); font-weight: 750; }
+    .intro { max-width: 650px; margin: 16px 0 28px; color: var(--muted); font-size: 1.08rem; }
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 32px; }
+    .button {
+      display: inline-flex; min-height: 44px; align-items: center; justify-content: center;
+      padding: 10px 16px; border: 1px solid var(--green); border-radius: 10px;
+      background: var(--green); color: white; font-weight: 700; text-decoration: none;
+    }
+    .button.secondary { background: transparent; color: var(--green-strong); }
+    .button:hover { background: var(--green-strong); color: white; }
+    .button:focus-visible, a:focus-visible { outline: 3px solid #f4bf3a; outline-offset: 3px; }
+    .grid { display: grid; grid-template-columns: 1.25fr 0.75fr; gap: 18px; }
+    .card { padding: 24px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); box-shadow: 0 8px 30px #1636210a; }
+    .fixtures { display: grid; gap: 12px; padding: 0; margin: 0; list-style: none; }
+    .fixture { padding: 14px 0; border-top: 1px solid var(--border); }
+    .fixture:first-child { padding-top: 0; border-top: 0; }
+    .fixture strong, .fixture time { display: block; }
+    .fixture time, .status { color: var(--muted); font-size: 0.92rem; }
+    .plain-list { padding-left: 1.2rem; }
+    footer { padding: 24px 0 48px; color: var(--muted); font-size: 0.9rem; }
+    @media (max-width: 680px) {
+      main { padding-top: 40px; }
+      .grid { grid-template-columns: 1fr; }
+      .button { flex: 1 1 100%; }
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --green: #45ce82; --green-strong: #7be6aa; --surface: #142019; --soft: #0d1510; --border: #2d4636; --text: #edf7f0; --muted: #b2c1b7; }
+      .button { background: #1b9a55; border-color: #45ce82; color: white; }
+      .button.secondary { background: transparent; color: var(--green-strong); }
+    }
   </style>
 </head>
 <body>
   <main>
+    <p class="eyebrow">전북현대 경기 일정</p>
     <h1>JeonbukCalendar</h1>
-    <p>전북현대 경기 일정을 Google Calendar와 동기화하는 개인용 오픈소스 도구입니다.</p>
+    <p class="intro">공식 발표된 전북현대 경기 일정을 하나의 ICS로 관리하고 Google Calendar에 안전하게 동기화합니다.</p>
 
-    <section class="card">
-      <h2>주요 기능</h2>
-      <ul>
-        <li>공개된 전북현대 경기 일정 파일을 불러옵니다.</li>
-        <li>사용자의 Google Calendar에서 전북현대 일정을 추가하거나 최신 내용으로 수정합니다.</li>
-        <li>관리 대상 일정에서 더 이상 제공되지 않는 항목을 정리합니다.</li>
-      </ul>
+    <div class="actions" aria-label="일정 사용 방법">
+      <a class="button" href="webcal://raw.githubusercontent.com/aassder95/JeonbukCalendar/main/jeonbuk.ics">캘린더 앱에 구독</a>
+      <a class="button secondary" href="https://raw.githubusercontent.com/aassder95/JeonbukCalendar/main/jeonbuk.ics" download="jeonbuk.ics">ICS 다운로드</a>
+      <a class="button secondary" href="https://github.com/aassder95/JeonbukCalendar">GitHub 저장소</a>
+    </div>
+
+    <div class="grid">
+      <section class="card" aria-labelledby="next-fixtures-title">
+        <h2 id="next-fixtures-title">다음 경기</h2>
+        <p id="fixture-status" class="status" role="status" aria-live="polite">최신 일정을 불러오는 중입니다.</p>
+        <ol id="fixtures" class="fixtures"></ol>
+        <noscript><p>다음 경기 표시는 JavaScript가 필요합니다. 위 ICS 다운로드 링크에서는 전체 일정을 확인할 수 있습니다.</p></noscript>
+      </section>
+
+      <section class="card" aria-labelledby="features-title">
+        <h2 id="features-title">운영 원칙</h2>
+        <ul class="plain-list">
+          <li>K리그, 코리아컵, 슈퍼컵, ACLE 일정을 관리합니다.</li>
+          <li>같은 경기의 UID를 유지해 중복 생성을 막습니다.</li>
+          <li>관리 표식이 있는 일정만 수정하거나 삭제합니다.</li>
+          <li>공식 발표 전 정보는 추정하지 않습니다.</li>
+        </ul>
+      </section>
+    </div>
+
+    <section class="card" style="margin-top: 18px">
+      <h2>Google 사용자 데이터 사용</h2>
+      <p>Google Calendar 권한은 사용자가 직접 실행한 일정 동기화에만 사용됩니다. 광고, 분석, 데이터 판매 목적으로 Google 사용자 데이터를 사용하지 않습니다.</p>
+      <p><a href="./privacy.html">개인정보처리방침 보기</a></p>
     </section>
-
-    <h2>Google 사용자 데이터 사용</h2>
-    <p>Google Calendar 권한은 사용자가 직접 실행한 일정 동기화에만 사용됩니다. 이 도구는 광고, 분석, 데이터 판매 목적으로 Google 사용자 데이터를 사용하지 않습니다.</p>
-
-    <p><a href="./privacy.html">개인정보처리방침 보기</a></p>
-    <p><a href="https://github.com/aassder95/JeonbukCalendar">GitHub 저장소 보기</a></p>
   </main>
   <footer>
     문의: <a href="mailto:aassder95@gmail.com">aassder95@gmail.com</a>
   </footer>
+  <script>
+    (() => {
+      const icsUrl = 'https://raw.githubusercontent.com/aassder95/JeonbukCalendar/main/jeonbuk.ics';
+      const list = document.querySelector('#fixtures');
+      const status = document.querySelector('#fixture-status');
+
+      function parseDate(line) {
+        const value = line.slice(line.indexOf(':') + 1);
+        if (/^\d{8}$/.test(value)) {
+          return new Date(`${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}T00:00:00+09:00`);
+        }
+        const match = value.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(Z?)$/);
+        if (!match) return null;
+        const suffix = match[7] === 'Z' ? 'Z' : '+09:00';
+        return new Date(`${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}${suffix}`);
+      }
+
+      function unescapeText(value) {
+        return value.replace(/\\n/gi, ' ').replace(/\\,/g, ',').replace(/\\;/g, ';').replace(/\\\\/g, '\\');
+      }
+
+      fetch(icsUrl, { cache: 'no-store' })
+        .then(response => {
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          return response.text();
+        })
+        .then(text => {
+          const unfolded = text.replace(/\r?\n[ \t]/g, '');
+          const now = new Date();
+          const fixtures = (unfolded.match(/BEGIN:VEVENT[\s\S]*?END:VEVENT/g) || [])
+            .map(block => {
+              const lines = block.split(/\r?\n/);
+              const startLine = lines.find(line => line.startsWith('DTSTART'));
+              const summaryLine = lines.find(line => line.startsWith('SUMMARY:'));
+              return startLine && summaryLine ? {
+                start: parseDate(startLine),
+                summary: unescapeText(summaryLine.slice('SUMMARY:'.length)),
+              } : null;
+            })
+            .filter(item => item?.start && item.start >= now)
+            .sort((a, b) => a.start - b.start)
+            .slice(0, 3);
+
+          if (fixtures.length === 0) {
+            status.textContent = '현재 공개된 미래 일정이 없습니다.';
+            return;
+          }
+          const formatter = new Intl.DateTimeFormat('ko-KR', {
+            timeZone: 'Asia/Seoul', dateStyle: 'full', timeStyle: 'short',
+          });
+          const fragment = document.createDocumentFragment();
+          for (const fixture of fixtures) {
+            const item = document.createElement('li');
+            item.className = 'fixture';
+            const title = document.createElement('strong');
+            title.textContent = fixture.summary;
+            const time = document.createElement('time');
+            time.dateTime = fixture.start.toISOString();
+            time.textContent = formatter.format(fixture.start);
+            item.append(title, time);
+            fragment.append(item);
+          }
+          list.append(fragment);
+          status.textContent = '공개 ICS에서 불러온 가까운 일정입니다.';
+        })
+        .catch(() => {
+          status.textContent = '일정을 불러오지 못했습니다. ICS 다운로드 또는 GitHub 저장소에서 확인해 주세요.';
+        });
+    })();
+  </script>
 </body>
 </html>

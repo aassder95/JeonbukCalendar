@@ -10,7 +10,9 @@
 - `apps-script/Code.gs`: Raw ICS를 읽어 Google Calendar의 `전북현대` 캘린더에 일정을 추가, 수정, 삭제하는 Apps Script 원본이다.
 - `apps-script/appsscript.json`: 시간대와 Google Calendar API v3 고급 서비스 설정이다.
 - `sync-calendar.cmd`: PowerShell 동기화 스크립트를 실행하고 성공 또는 실패 종료 코드를 반환한다.
-- `sync-calendar.ps1`: Apps Script API로 `syncJeonbuk`를 호출하고 추가, 수정, 변경 없음, 삭제 건수를 검증한다.
+- `sync-calendar.ps1`: Apps Script API에서 미리보기 후 같은 ICS 해시로 적용하고 추가, 수정, 변경 없음, 삭제 건수를 검증한다.
+- `calendar.cmd`: 검증, 변경 미리보기, 배포 상태 확인, 동기화, Apps Script 배포를 제공하는 통합 진입점이다.
+- `scripts/calendar.ps1`: `calendar.cmd`의 실제 운영 로직이다.
 - `.clasp.json.example`: 로컬 전용 `.clasp.json` 설정 예시다.
 - `sync-log.txt`: `sync-calendar.ps1` 실행 이력을 남기는 로컬 전용 파일이다. 저장소 루트에 실행 시 자동 생성되며 Git에 커밋되지 않는다.
 - Raw ICS URL: `https://raw.githubusercontent.com/aassder95/JeonbukCalendar/main/jeonbuk.ics`
@@ -22,12 +24,32 @@
 ### 평소 사용 순서
 
 1. `jeonbuk.ics`를 최신 일정으로 수정한다.
-2. 변경 내용을 GitHub `main` 브랜치에 푸시한다.
-3. 푸시가 끝나면 저장소 루트의 `sync-calendar.cmd`를 실행한다.
-4. 콘솔에 `전북현대 일정 동기화 완료`와 추가, 수정, 변경 없음, 삭제 건수가 표시되는지 확인한다.
-5. Google Calendar를 새로고침하여 변경된 일정을 확인한다.
+2. `calendar.cmd Validate`로 로컬 데이터와 코드를 검증한다.
+3. 변경 내용을 GitHub `main` 브랜치에 푸시한다.
+4. `calendar.cmd Preview`로 실제 반영 예정 항목과 삭제 대상을 확인한다.
+5. `calendar.cmd Sync`를 실행한다.
+6. Google Calendar를 새로고침하여 변경된 일정을 확인한다.
 
-> GitHub에 푸시하는 것만으로 Google Calendar가 변경되지는 않는다. 푸시 후 반드시 `sync-calendar.cmd`를 더블클릭해야 캘린더에 반영된다.
+> GitHub에 푸시하는 것만으로 Google Calendar가 변경되지는 않는다. 푸시 후 `calendar.cmd Sync` 또는 기존 `sync-calendar.cmd`를 실행해야 반영된다.
+
+### 통합 운영 명령
+
+```powershell
+calendar.cmd Validate
+calendar.cmd Preview
+calendar.cmd Status
+calendar.cmd Sync
+calendar.cmd Sync -AllowLargeDelete
+calendar.cmd Deploy -DeploymentId "기존_API_실행_파일_ID"
+```
+
+- `Validate`: 테스트, 공백 오류, 비밀 파일 Git 추적 여부를 검사한다.
+- `Preview`: 추가·수정·삭제 대상 UID와 ICS 해시를 읽기 전용으로 표시한다.
+- `Status`: 로컬 `sourceVersion`과 배포된 버전을 비교한다. 불일치 시 종료 코드 2를 반환한다.
+- `Sync`: 미리보기 직후 같은 ICS 해시인지 다시 확인하고 적용한다.
+- `-AllowLargeDelete`: 5건 초과 또는 기존 관리 일정 20% 초과 삭제를 확인한 경우에만 사용한다.
+- `Deploy`: 로컬 검증 후 Apps Script 소스 반영, 버전 생성, 지정된 기존 API 실행 배포 갱신을 수행한다.
+- 각 읽기·실행 명령은 `-Json`을 지원해 AI가 구조화된 결과를 받을 수 있다.
 
 `sync-calendar.ps1`은 실행할 때마다 시각과 결과를 저장소 루트의 `sync-log.txt`에 한 줄씩 추가한다(성공 시 `status=success created=... updated=... unchanged=... deleted=...`, 실패 시 `status=failed error=...` 형식). 이 파일은 로컬 실행 이력 확인용이며 Git에는 커밋되지 않는다. 로그 기록 자체가 실패해도 콘솔 출력과 종료 코드는 실제 동기화 성공/실패만 따른다.
 
@@ -50,7 +72,9 @@
 
 OAuth 클라이언트 JSON, `.clasp.json`, clasp 인증 정보는 Git에 커밋하지 않는다. 예약 실행은 최초 로그인에서 저장된 OAuth 갱신 토큰을 재사용하므로 브라우저 선택이나 로그인 입력을 요구하지 않는다.
 
-Apps Script API는 배포된 버전을 실행한다. `apps-script/Code.gs` 또는 `apps-script/appsscript.json`을 변경했으면 웹 편집기에 반영하고 API 실행 파일을 새 버전으로 갱신한 뒤 사용한다. GitHub에 푸시하는 것만으로 Apps Script 프로젝트 코드가 자동 배포되지는 않는다.
+Calendar 권한은 소유한 캘린더의 이벤트 편집, 캘린더 목록 읽기, 캘린더 속성 읽기로 제한한다. 대상 `전북현대` 캘린더가 현재 실행 계정 소유가 아니면 권한 범위를 임의로 넓히지 말고 운영 구조를 먼저 재검토한다.
+
+Apps Script API는 배포된 버전을 실행한다. `apps-script/Code.gs` 또는 `apps-script/appsscript.json`을 변경했으면 `calendar.cmd Deploy -DeploymentId "..."`로 기존 API 실행 파일을 새 버전으로 갱신하거나 웹 편집기에서 같은 절차를 수행한다. `calendar.cmd Status`는 배포된 `sourceVersion`이 로컬 코드와 같은지 확인한다. GitHub push만으로 Apps Script 프로젝트가 자동 배포되지는 않는다.
 
 명령줄 실행을 사용할 수 없는 비상 상황에는 Apps Script 편집기에서 `syncJeonbuk`를 직접 실행한다. 매일 실행하는 Apps Script 자동 트리거는 설치하지 않는다.
 
@@ -82,13 +106,15 @@ Windows PowerShell 실행 정책이 `npm.ps1`을 차단할 수 있으므로 `npm
 ## 일정 식별과 갱신
 
 - 각 일정은 ICS의 `UID`로 식별한다.
-- 기존 `UID`가 있으면 제목, 장소, 설명, 시작 및 종료 시간, 라벨, 관리 표식을 비교하고 달라진 경우에만 수정한다.
+- 기존 `UID`가 있으면 제목, 장소, 설명, 시작 및 종료 시간, 라벨, 관리 표식을 비교하고 달라진 관리 필드만 부분 수정한다. 사용자가 추가한 알림·참석자 등 관리 밖 필드는 보존한다.
 - 새로운 `UID`이면 새 일정을 추가한다.
 - 기존 일정의 `UID`를 바꾸면 중복 일정이 생길 수 있으므로 같은 경기는 기존 `UID`를 유지한다.
 - ICS에 `DESCRIPTION`이 없으면 기존 Google Calendar 메모를 삭제한다.
 - 동기화가 만든 일정에는 비공개 관리 표식을 저장한다.
 - 관리 표식이 있는 일정이 ICS에서 사라지면 Google Calendar에서도 자동 삭제한다. 관리 표식이 없는 회사 일정이나 직접 만든 일정은 삭제하지 않는다.
 - 빈 ICS나 읽기 오류로 전체 일정이 잘못 삭제되지 않도록, 읽은 일정이 0건이면 동기화를 중단한다.
+- 적용 전에 전체 변경 계획을 검증하며, 삭제가 5건을 넘거나 기존 관리 일정의 20%를 넘으면 명시 승인 없이는 중단한다.
+- 미리보기와 적용 사이에 ICS가 바뀌면 SHA-256 해시 불일치로 중단한다.
 
 ## 라벨
 

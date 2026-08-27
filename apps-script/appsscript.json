@@ -13,7 +13,9 @@
     "access": "MYSELF"
   },
   "oauthScopes": [
-    "https://www.googleapis.com/auth/calendar",
+    "https://www.googleapis.com/auth/calendar.events.owned",
+    "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+    "https://www.googleapis.com/auth/calendar.calendars.readonly",
     "https://www.googleapis.com/auth/script.external_request"
   ],
   "exceptionLogging": "STACKDRIVER",

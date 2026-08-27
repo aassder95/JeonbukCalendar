@@ -9,7 +9,7 @@
 - Raw ICS 원본은 `https://raw.githubusercontent.com/aassder95/JeonbukCalendar/main/jeonbuk.ics`다.
 - 시간대는 모든 계층에서 `Asia/Seoul`을 기준으로 한다.
 - 저장소의 `apps-script/Code.gs`와 `apps-script/appsscript.json`이 Apps Script 소스의 기준이다. 다만 Git push만으로 Apps Script 배포가 갱신되지는 않는다.
-- 2026-08-27 기준, 기존 관리 일정과 동기화 대상 필드가 같으면 Google Calendar update를 생략하고 `unchanged`로 집계하는 로직과 테스트가 반영되어 있다.
+- 2026-08-27 기준, 동일 일정은 `unchanged`로 집계하고 변경 일정은 관리 대상 필드만 `patch`하며, 미리보기 해시와 대량 삭제 보호를 거쳐 적용한다.
 
 ## 먼저 읽을 파일
 
@@ -34,8 +34,13 @@ jeonbuk.ics (일정 원본)
 
 sync-calendar.cmd
   -> sync-calendar.ps1
-  -> clasp run-function syncJeonbuk --nondev
-  -> created / updated / unchanged / deleted 결과 검증
+  -> previewJeonbuk
+  -> 동일 ICS 해시로 applyJeonbuk
+  -> created / updated / unchanged / deleted / sourceVersion / icsHash 결과 검증
+
+calendar.cmd
+  -> scripts/calendar.ps1
+  -> Validate / Preview / Status / Sync / Deploy 운영 명령
 ```
 
 주요 파일의 역할은 다음과 같다.
@@ -45,6 +50,8 @@ sync-calendar.cmd
 - `apps-script/appsscript.json`: V8 런타임, 시간대, Calendar 고급 서비스, OAuth 범위, 실행 API 설정
 - `sync-calendar.ps1`: 로컬 OAuth 인증을 재사용해 배포된 `syncJeonbuk`를 호출하고 응답 형식을 검증
 - `sync-calendar.cmd`: Windows에서 PowerShell 실행 정책을 우회해 위 스크립트를 실행하는 진입점
+- `calendar.cmd`: 검증, 미리보기, 상태, 동기화, 배포를 한 진입점에서 실행하는 AI·사용자용 도구
+- `scripts/calendar.ps1`: 로컬 검증, 배포 버전 비교, 명시적 Apps Script 배포를 담당하는 운영 스크립트
 - `sync-log.txt`: `sync-calendar.ps1` 실행마다 시각과 결과(성공 시 건수, 실패 시 오류 메시지)를 한 줄씩 append하는 로컬 전용 실행 이력. 저장소 루트에 실행 시 자동 생성되며 `.gitignore`에 포함되어 커밋되지 않는다. 이 파일 기록 실패는 보조 기능 실패일 뿐이므로 실제 동기화 성공 여부나 스크립트 종료 코드에 영향을 주면 안 된다.
 - `test/code.test.js`: Node VM에서 Apps Script의 순수 로직과 저장소 ICS를 검증하는 정적 테스트
 - `.clasp.json.example`: 비밀값이 없는 로컬 설정 예시
@@ -64,17 +71,22 @@ sync-calendar.cmd
 
 ## 동기화 구현 계약
 
-- `syncJeonbuk()`는 `{ created, updated, unchanged, deleted }`의 음이 아닌 정수 결과를 반환해야 한다.
+- `syncJeonbuk()`와 `applyJeonbuk()`는 `{ created, updated, unchanged, deleted, icsHash, sourceVersion }` 결과를 반환하며 건수는 음이 아닌 정수여야 한다.
 - ICS 파싱 결과가 0건이면 전체 삭제 위험을 막기 위해 즉시 실패해야 한다.
 - 중복되거나 빈 `UID`는 동기화 전에 실패해야 한다.
 - 동기화가 만든 일정만 `extendedProperties.private.jeonbukCalendarManaged=true` 표식으로 관리한다. 표식이 없는 사용자·회사 일정은 수정하거나 삭제하지 않는다.
 - 기존 일정 비교 대상은 `summary`, `location`, `description`, `start`, `end`, `eventLabelId`, 관리 표식이다. 서버 전용 필드인 `id`, `etag`, `updated` 등은 비교하지 않는다.
 - `location`과 `description`의 `null`, `undefined`, 빈 문자열은 같은 값으로 취급한다.
 - 종일 일정은 `date`를 그대로 비교하고, 시간 일정은 RFC3339 절대 시각으로 비교한다. `Asia/Seoul` 오프셋 없는 로컬 시각과 같은 UTC 시각을 동일하게 처리해야 한다.
-- 기존 값이 같으면 `Calendar.Events.update()`를 호출하지 않고 `unchanged`를 증가시킨다.
-- 신규 일정은 `Calendar.Events.import()`, 변경 일정은 `Calendar.Events.update()`, 사라진 관리 일정은 `Calendar.Events.remove()`를 사용한다.
+- 기존 값이 같으면 Calendar 쓰기 API를 호출하지 않고 `unchanged`를 증가시킨다.
+- 신규 일정은 `Calendar.Events.import()`, 변경 일정은 동기화 소유 필드만 `Calendar.Events.patch()`, 사라진 관리 일정은 `Calendar.Events.remove()`를 사용한다.
+- 모든 일정의 날짜, 시간대, 라벨, UID를 검증하고 전체 변경 계획을 만든 뒤 첫 쓰기를 시작한다.
+- `previewJeonbuk()`는 변경 건수, 대상 UID, ICS SHA-256, 소스 버전, 대량 삭제 승인 필요 여부를 반환한다.
+- `applyJeonbuk(expectedIcsHash, allowLargeDelete)`는 적용 직전 ICS 해시를 다시 확인한다.
+- 삭제가 5건을 넘거나 기존 관리 일정의 20%를 넘으면 명시적인 대량 삭제 승인이 필요하다.
 - stale 삭제 동작을 다른 최적화와 묶어 변경하지 않는다.
 - 라벨 이름을 바꾸면 Google Calendar의 실제 라벨, `CONFIG.labelNames`, `findLabelName`, 테스트를 함께 확인한다.
+- OAuth 범위는 소유 캘린더 이벤트 편집, 캘린더 목록 읽기, 캘린더 속성 읽기로 제한한다. 대상 캘린더 소유권이 달라지면 범위를 임의 확대하지 말고 운영 계약을 재검토한다.
 
 ## 변경 범위와 보안 경계
 
@@ -82,8 +94,9 @@ sync-calendar.cmd
 - `.clasp.json`, `.clasprc*.json`, `client_secret*.json`, `oauth-client*.json`, OAuth 토큰과 계정 정보는 읽어서 출력하거나 커밋하지 않는다.
 - `apps-script/Code.gs` 쓰기가 `Access denied` 또는 `Failed to write file`로 막히면 ACL 변경, 원본 삭제·교체 같은 우회를 하지 않는다. 권한이 있는 세션에서 다시 작업한다.
 - Apps Script 배포, 실제 Google Calendar 동기화, 실제 commit/push는 사용자가 명시적으로 요청한 경우에만 수행한다.
-- `installDailyTrigger()`는 현재 운영 경로가 아니다. 별도 요청 없이 호출하거나 자동 트리거를 설치하지 않는다.
+- 자동 트리거 설치 함수는 제거되어 있으며 별도 요청 없이 다시 추가하거나 자동 트리거를 설치하지 않는다.
 - 배포된 Apps Script API는 저장소 파일이 아니라 배포 버전을 실행한다. 소스 변경 뒤 실제 동기화를 요구받았다면 웹 편집기 반영과 API 실행 파일 새 버전 배포 여부를 따로 확인한다.
+- `apps-script/Code.gs`를 변경할 때 `CONFIG.sourceVersion`도 갱신하고 `calendar.cmd Status`로 배포 버전과 비교한다.
 
 ## 공식 경기 결과 자동 반영 시 안전 절차
 
@@ -105,6 +118,7 @@ PowerShell 실행 정책이 `npm.ps1`을 차단할 수 있으므로 Windows에�
 
 ```powershell
 npm.cmd test
+calendar.cmd Validate
 git diff --check
 git status --short -uall
 ```

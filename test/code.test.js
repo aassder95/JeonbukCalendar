@@ -1,11 +1,25 @@
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 
 const codePath = path.join(__dirname, '..', 'apps-script', 'Code.gs');
-const context = vm.createContext({ console });
+const context = vm.createContext({
+  console,
+  Utilities: {
+    DigestAlgorithm: { SHA_256: 'SHA_256' },
+    Charset: { UTF_8: 'UTF_8' },
+    computeDigest(algorithm, value, charset) {
+      assert.equal(algorithm, 'SHA_256');
+      assert.equal(charset, 'UTF_8');
+      return Array.from(crypto.createHash('sha256').update(value, 'utf8').digest(), byte => (
+        byte > 127 ? byte - 256 : byte
+      ));
+    },
+  },
+});
 vm.runInContext(fs.readFileSync(codePath, 'utf8'), context, { filename: codePath });
 
 function getFunction(name) {
@@ -150,6 +164,27 @@ test('indexManagedEventsByUid rejects duplicate managed events', () => {
   );
 });
 
+test('parseIcs rejects invalid dates, time zones, and end times', () => {
+  assert.throws(
+    () => getFunction('parseIcs')(makeCalendar(makeEvent({
+      start: 'DTSTART;TZID=Asia/Seoul:20260230T140000',
+    }))),
+    /존재하지 않는 ICS 날짜/,
+  );
+  assert.throws(
+    () => getFunction('parseIcs')(makeCalendar(makeEvent({
+      start: 'DTSTART:20260301T140000',
+    }))),
+    /TZID=Asia\/Seoul/,
+  );
+  assert.throws(
+    () => getFunction('parseIcs')(makeCalendar(makeEvent({
+      end: 'DTEND;TZID=Asia/Seoul:20260301T130000',
+    }))),
+    /시작 또는 종료 시간이 올바르지/,
+  );
+});
+
 test('areManagedEventsEqual compares only synchronized fields', () => {
   const areManagedEventsEqual = getFunction('areManagedEventsEqual');
   const expected = makeManagedEvent();
@@ -213,8 +248,8 @@ test('syncManagedEvent skips equal events and writes only created or changed eve
       import(event, calendarId, options) {
         calls.push({ method: 'import', event, calendarId, options });
       },
-      update(event, calendarId, eventId, options) {
-        calls.push({ method: 'update', event, calendarId, eventId, options });
+      patch(event, calendarId, eventId, options) {
+        calls.push({ method: 'patch', event, calendarId, eventId, options });
       },
     },
   };
@@ -234,50 +269,8 @@ test('syncManagedEvent skips equal events and writes only created or changed eve
     id: 'event-1',
     ...makeManagedEvent({ summary: '변경 전 제목' }),
   }), 'updated');
-  assert.equal(calls[1].method, 'update');
+  assert.equal(calls[1].method, 'patch');
   assert.equal(calls[1].eventId, 'event-1');
-});
-
-test('installDailyTrigger replaces duplicate sync triggers and creates the daily trigger', () => {
-  const calls = [];
-  const duplicateTrigger = { getHandlerFunction: () => 'syncJeonbuk' };
-  const otherTrigger = { getHandlerFunction: () => 'otherHandler' };
-  const builder = {
-    timeBased() {
-      calls.push(['timeBased']);
-      return this;
-    },
-    everyDays(days) {
-      calls.push(['everyDays', days]);
-      return this;
-    },
-    atHour(hour) {
-      calls.push(['atHour', hour]);
-      return this;
-    },
-    create() {
-      calls.push(['create']);
-    },
-  };
-  context.ScriptApp = {
-    getProjectTriggers: () => [duplicateTrigger, otherTrigger],
-    deleteTrigger: trigger => calls.push(['deleteTrigger', trigger]),
-    newTrigger(handler) {
-      calls.push(['newTrigger', handler]);
-      return builder;
-    },
-  };
-
-  getFunction('installDailyTrigger')();
-
-  assert.deepEqual(calls, [
-    ['deleteTrigger', duplicateTrigger],
-    ['newTrigger', 'syncJeonbuk'],
-    ['timeBased'],
-    ['everyDays', 1],
-    ['atHour', 6],
-    ['create'],
-  ]);
 });
 
 test('findTargetCalendar returns the single writable calendar with the configured name', () => {
@@ -430,9 +423,10 @@ test('syncJeonbuk orchestrates created, updated, unchanged, and deleted events',
   };
   context.LockService = { getScriptLock: () => lock };
   context.UrlFetchApp = {
-    fetch(url) {
-      calls.push(['fetch', url]);
+    fetch(url, options) {
+      calls.push(['fetch', url, options]);
       return {
+        getResponseCode: () => 200,
         getContentText(encoding) {
           calls.push(['getContentText', encoding]);
           return ics;
@@ -459,8 +453,8 @@ test('syncJeonbuk orchestrates created, updated, unchanged, and deleted events',
       import(event, calendarId, options) {
         calls.push(['import', event, calendarId, options]);
       },
-      update(event, calendarId, eventId, options) {
-        calls.push(['update', event, calendarId, eventId, options]);
+      patch(event, calendarId, eventId, options) {
+        calls.push(['patch', event, calendarId, eventId, options]);
       },
       remove(calendarId, eventId, options) {
         calls.push(['remove', calendarId, eventId, options]);
@@ -468,19 +462,33 @@ test('syncJeonbuk orchestrates created, updated, unchanged, and deleted events',
     },
   };
 
-  const result = getFunction('syncJeonbuk')();
+  assert.throws(
+    () => getFunction('syncJeonbuk')(),
+    /대량 삭제 보호/,
+  );
+  assert.equal(calls.filter(([method]) => ['import', 'patch', 'remove'].includes(method)).length, 0);
+  assert.throws(
+    () => getFunction('applyJeonbuk')('incorrect-hash', true),
+    /미리보기 이후 ICS가 변경/,
+  );
+  assert.equal(calls.filter(([method]) => ['import', 'patch', 'remove'].includes(method)).length, 0);
+  const result = getFunction('applyJeonbuk')(null, true);
 
-  assert.deepEqual(JSON.parse(JSON.stringify(result)), {
-    created: 1,
-    updated: 1,
-    unchanged: 1,
-    deleted: 1,
-  });
+  assert.equal(result.created, 1);
+  assert.equal(result.updated, 1);
+  assert.equal(result.unchanged, 1);
+  assert.equal(result.deleted, 1);
+  assert.match(result.icsHash, /^[0-9a-f]{64}$/);
+  assert.equal(result.sourceVersion, config.sourceVersion);
   assert.equal(calls.filter(([method]) => method === 'import').length, 1);
-  assert.equal(calls.filter(([method]) => method === 'update').length, 1);
+  assert.equal(calls.filter(([method]) => method === 'patch').length, 1);
   assert.equal(calls.filter(([method]) => method === 'remove').length, 1);
   assert.equal(calls.find(([method]) => method === 'import')[1].eventLabelId, 'label-1');
   assert.deepEqual(calls.filter(([method]) => method === 'tryLock' || method === 'releaseLock'), [
+    ['tryLock', 0],
+    ['releaseLock'],
+    ['tryLock', 0],
+    ['releaseLock'],
     ['tryLock', 0],
     ['releaseLock'],
   ]);
@@ -507,27 +515,14 @@ test('listManagedEvents follows page tokens and filters by the management marker
   assert.equal(requests[1].pageToken, 'next');
 });
 
-test('deleteStaleEvents removes only managed events missing from the ICS', () => {
-  const removed = [];
-  context.Calendar = {
-    Events: {
-      remove(calendarId, eventId, options) {
-        removed.push({ calendarId, eventId, options });
-      },
-    },
-  };
+test('large deletion protection uses count and ratio thresholds', () => {
+  const isLargeDeletion = getFunction('isLargeDeletion');
 
-  const deleted = getFunction('deleteStaleEvents')('calendar-1', [
-    { id: 'keep', iCalUID: 'uid-1' },
-    { id: 'remove', iCalUID: 'uid-2' },
-  ], new Set(['uid-1']));
-
-  assert.equal(deleted, 1);
-  assert.deepEqual(JSON.parse(JSON.stringify(removed)), [{
-    calendarId: 'calendar-1',
-    eventId: 'remove',
-    options: { sendUpdates: 'none' },
-  }]);
+  assert.equal(isLargeDeletion(0, 44), false);
+  assert.equal(isLargeDeletion(1, 44), false);
+  assert.equal(isLargeDeletion(5, 44), false);
+  assert.equal(isLargeDeletion(6, 44), true);
+  assert.equal(isLargeDeletion(3, 10), true);
 });
 
 test('the repository ICS parses to unique, recognized fixtures', () => {
@@ -539,5 +534,30 @@ test('the repository ICS parses to unique, recognized fixtures', () => {
   assert.equal(new Set(fixtures.map(fixture => fixture.uid)).size, fixtures.length);
   for (const fixture of fixtures) {
     assert.doesNotThrow(() => findLabelName(fixture.summary));
+  }
+});
+
+test('repository configuration and ICS formatting stay consistent', () => {
+  const config = getFunction('CONFIG');
+  const manifestPath = path.join(__dirname, '..', 'apps-script', 'appsscript.json');
+  const packagePath = path.join(__dirname, '..', 'package.json');
+  const icsPath = path.join(__dirname, '..', 'jeonbuk.ics');
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  const packageJson = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+  const ics = fs.readFileSync(icsPath, 'utf8');
+
+  assert.equal(manifest.timeZone, config.timeZone);
+  assert.ok(!manifest.oauthScopes.includes('https://www.googleapis.com/auth/calendar'));
+  for (const scope of [
+    'https://www.googleapis.com/auth/calendar.events.owned',
+    'https://www.googleapis.com/auth/calendar.calendarlist.readonly',
+    'https://www.googleapis.com/auth/calendar.calendars.readonly',
+  ]) {
+    assert.ok(manifest.oauthScopes.includes(scope), scope);
+  }
+  assert.equal(packageJson.private, true);
+  assert.match(config.icsUrl, /\/aassder95\/JeonbukCalendar\/main\/jeonbuk\.ics$/);
+  for (const [index, line] of ics.split(/\r?\n/).entries()) {
+    assert.ok(Buffer.byteLength(line, 'utf8') <= 75, `ICS line ${index + 1} exceeds 75 octets`);
   }
 });
