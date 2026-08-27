@@ -14,46 +14,55 @@ const CONFIG = {
 };
 
 function syncJeonbuk() {
-  const calendar = findTargetCalendar();
-  const labelIds = getLabelIds(calendar.id);
-  const ics = UrlFetchApp.fetch(CONFIG.icsUrl).getContentText('UTF-8');
-  const fixtures = parseIcs(ics);
-  if (fixtures.length === 0) throw new Error('ICS 일정이 0건이므로 동기화를 중단합니다.');
-
-  const currentUids = new Set(fixtures.map(fixture => fixture.uid));
-  const managedEvents = listManagedEvents(calendar.id);
-  const managedEventsByUid = indexManagedEventsByUid(managedEvents);
-
-  let created = 0;
-  let updated = 0;
-  let unchanged = 0;
-
-  for (const fixture of fixtures) {
-    const labelName = findLabelName(`${fixture.summary}\n${fixture.description}`);
-    const event = {
-      summary: fixture.summary,
-      location: fixture.location,
-      description: fixture.description || null,
-      start: fixture.start,
-      end: fixture.end,
-      eventLabelId: labelIds[labelName],
-      extendedProperties: {
-        private: {
-          [CONFIG.managedPropertyName]: CONFIG.managedPropertyValue,
-        },
-      },
-    };
-    const existing = managedEventsByUid.get(fixture.uid);
-    const result = syncManagedEvent(calendar.id, fixture.uid, event, existing);
-
-    if (result === 'created') created++;
-    if (result === 'updated') updated++;
-    if (result === 'unchanged') unchanged++;
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(0)) {
+    throw new Error('이미 다른 동기화가 진행 중입니다.');
   }
 
-  const deleted = deleteStaleEvents(calendar.id, managedEvents, currentUids);
-  console.log(`동기화 완료: 추가 ${created}건, 수정 ${updated}건, 변경 없음 ${unchanged}건, 삭제 ${deleted}건`);
-  return { created, updated, unchanged, deleted };
+  try {
+    const calendar = findTargetCalendar();
+    const labelIds = getLabelIds(calendar.id);
+    const ics = UrlFetchApp.fetch(CONFIG.icsUrl).getContentText('UTF-8');
+    const fixtures = parseIcs(ics);
+    if (fixtures.length === 0) throw new Error('ICS 일정이 0건이므로 동기화를 중단합니다.');
+
+    const currentUids = new Set(fixtures.map(fixture => fixture.uid));
+    const managedEvents = listManagedEvents(calendar.id);
+    const managedEventsByUid = indexManagedEventsByUid(managedEvents);
+
+    let created = 0;
+    let updated = 0;
+    let unchanged = 0;
+
+    for (const fixture of fixtures) {
+      const labelName = findLabelName(fixture.summary);
+      const event = {
+        summary: fixture.summary,
+        location: fixture.location,
+        description: fixture.description || null,
+        start: fixture.start,
+        end: fixture.end,
+        eventLabelId: labelIds[labelName],
+        extendedProperties: {
+          private: {
+            [CONFIG.managedPropertyName]: CONFIG.managedPropertyValue,
+          },
+        },
+      };
+      const existing = managedEventsByUid.get(fixture.uid);
+      const result = syncManagedEvent(calendar.id, fixture.uid, event, existing);
+
+      if (result === 'created') created++;
+      if (result === 'updated') updated++;
+      if (result === 'unchanged') unchanged++;
+    }
+
+    const deleted = deleteStaleEvents(calendar.id, managedEvents, currentUids);
+    console.log(`동기화 완료: 추가 ${created}건, 수정 ${updated}건, 변경 없음 ${unchanged}건, 삭제 ${deleted}건`);
+    return { created, updated, unchanged, deleted };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function syncManagedEvent(calendarId, uid, event, existing) {
