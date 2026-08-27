@@ -98,7 +98,6 @@ Write-Output "추가 $($result.created)건"
 Write-Output "수정 $($result.updated)건"
 Write-Output "변경 없음 $($result.unchanged)건"
 Write-Output "삭제 $($result.deleted)건"
-Add-SyncLogEntry -Status 'success' -Details "created=$($result.created) updated=$($result.updated) unchanged=$($result.unchanged) deleted=$($result.deleted)"
 } catch {
   $syncError = $_
   try {
@@ -107,4 +106,10 @@ Add-SyncLogEntry -Status 'success' -Details "created=$($result.created) updated=
     Write-Warning "동기화 실패 이력을 기록하지 못했습니다: $($_.Exception.Message)"
   }
   throw $syncError
+}
+
+try {
+  Add-SyncLogEntry -Status 'success' -Details "created=$($result.created) updated=$($result.updated) unchanged=$($result.unchanged) deleted=$($result.deleted)"
+} catch {
+  Write-Warning "동기화 성공 이력을 기록하지 못했습니다: $($_.Exception.Message)"
 }
