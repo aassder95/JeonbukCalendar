@@ -66,7 +66,7 @@ if ($null -eq $responseProperty -or $null -eq $responseProperty.Value) {
 }
 $result = $responseProperty.Value
 
-foreach ($propertyName in 'created', 'updated', 'deleted') {
+foreach ($propertyName in 'created', 'updated', 'unchanged', 'deleted') {
   $property = $result.PSObject.Properties[$propertyName]
   if ($null -eq $property -or $property.Value -isnot [long] -and $property.Value -isnot [int]) {
     throw "Apps Script 응답에 정수형 '$propertyName' 값이 없습니다.`n$outputText"
@@ -79,4 +79,5 @@ foreach ($propertyName in 'created', 'updated', 'deleted') {
 Write-Output '전북현대 일정 동기화 완료'
 Write-Output "추가 $($result.created)건"
 Write-Output "수정 $($result.updated)건"
+Write-Output "변경 없음 $($result.unchanged)건"
 Write-Output "삭제 $($result.deleted)건"

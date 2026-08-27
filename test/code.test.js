@@ -44,6 +44,23 @@ function makeEvent(overrides = {}) {
   ];
 }
 
+function makeManagedEvent(overrides = {}) {
+  return {
+    summary: '[K리그1 R1] 전북 vs 서울',
+    location: '전북 홈',
+    description: '설명',
+    start: { dateTime: '2026-03-01T05:00:00Z' },
+    end: { dateTime: '2026-03-01T07:00:00Z' },
+    eventLabelId: 'label-1',
+    extendedProperties: {
+      private: {
+        jeonbukCalendarManaged: 'true',
+      },
+    },
+    ...overrides,
+  };
+}
+
 test('parseIcs parses local date-times and escaped text', () => {
   const [fixture] = getFunction('parseIcs')(makeCalendar(makeEvent({
     location: '전북\\, 홈',
@@ -133,6 +150,94 @@ test('indexManagedEventsByUid rejects duplicate managed events', () => {
   );
 });
 
+test('areManagedEventsEqual compares only synchronized fields', () => {
+  const areManagedEventsEqual = getFunction('areManagedEventsEqual');
+  const expected = makeManagedEvent();
+
+  assert.equal(areManagedEventsEqual({
+    ...makeManagedEvent(),
+    id: 'server-id',
+    etag: 'server-etag',
+    updated: '2026-08-27T00:00:00Z',
+  }, expected), true);
+
+  for (const [field, value] of [
+    ['summary', '[K리그1 R1] 전북 1-0 서울'],
+    ['location', '서울 원정'],
+    ['description', '다른 설명'],
+    ['eventLabelId', 'label-2'],
+  ]) {
+    assert.equal(areManagedEventsEqual(makeManagedEvent({ [field]: value }), expected), false, field);
+  }
+});
+
+test('areManagedEventsEqual normalizes optional text and timed event offsets', () => {
+  const areManagedEventsEqual = getFunction('areManagedEventsEqual');
+  const expected = makeManagedEvent({
+    location: '',
+    description: null,
+    start: { dateTime: '2026-03-01T14:00:00', timeZone: 'Asia/Seoul' },
+    end: { dateTime: '2026-03-01T16:00:00', timeZone: 'Asia/Seoul' },
+  });
+  const existing = makeManagedEvent({
+    location: undefined,
+    description: undefined,
+    start: { dateTime: '2026-03-01T05:00:00Z' },
+    end: { dateTime: '2026-03-01T07:00:00Z' },
+  });
+
+  assert.equal(areManagedEventsEqual(existing, expected), true);
+});
+
+test('areManagedEventsEqual detects date and management marker changes', () => {
+  const areManagedEventsEqual = getFunction('areManagedEventsEqual');
+  const expectedAllDay = makeManagedEvent({
+    start: { date: '2026-08-15' },
+    end: { date: '2026-08-16' },
+  });
+
+  assert.equal(areManagedEventsEqual(makeManagedEvent({
+    start: { date: '2026-08-16' },
+    end: { date: '2026-08-17' },
+  }), expectedAllDay), false);
+  assert.equal(areManagedEventsEqual(makeManagedEvent(), expectedAllDay), false);
+  assert.equal(areManagedEventsEqual(makeManagedEvent({
+    extendedProperties: { private: { jeonbukCalendarManaged: 'false' } },
+  }), makeManagedEvent()), false);
+});
+
+test('syncManagedEvent skips equal events and writes only created or changed events', () => {
+  const calls = [];
+  context.Calendar = {
+    Events: {
+      import(event, calendarId, options) {
+        calls.push({ method: 'import', event, calendarId, options });
+      },
+      update(event, calendarId, eventId, options) {
+        calls.push({ method: 'update', event, calendarId, eventId, options });
+      },
+    },
+  };
+  const syncManagedEvent = getFunction('syncManagedEvent');
+
+  assert.equal(syncManagedEvent('calendar-1', 'uid-1', makeManagedEvent(), {
+    id: 'event-1',
+    ...makeManagedEvent(),
+  }), 'unchanged');
+  assert.equal(calls.length, 0);
+
+  assert.equal(syncManagedEvent('calendar-1', 'uid-2', makeManagedEvent(), null), 'created');
+  assert.equal(calls[0].method, 'import');
+  assert.equal(calls[0].event.iCalUID, 'uid-2');
+
+  assert.equal(syncManagedEvent('calendar-1', 'uid-1', makeManagedEvent(), {
+    id: 'event-1',
+    ...makeManagedEvent({ summary: '변경 전 제목' }),
+  }), 'updated');
+  assert.equal(calls[1].method, 'update');
+  assert.equal(calls[1].eventId, 'event-1');
+});
+
 test('listManagedEvents follows page tokens and filters by the management marker', () => {
   const requests = [];
   context.Calendar = {
@@ -152,6 +257,29 @@ test('listManagedEvents follows page tokens and filters by the management marker
   assert.equal(requests.length, 2);
   assert.equal(requests[0].privateExtendedProperty, 'jeonbukCalendarManaged=true');
   assert.equal(requests[1].pageToken, 'next');
+});
+
+test('deleteStaleEvents removes only managed events missing from the ICS', () => {
+  const removed = [];
+  context.Calendar = {
+    Events: {
+      remove(calendarId, eventId, options) {
+        removed.push({ calendarId, eventId, options });
+      },
+    },
+  };
+
+  const deleted = getFunction('deleteStaleEvents')('calendar-1', [
+    { id: 'keep', iCalUID: 'uid-1' },
+    { id: 'remove', iCalUID: 'uid-2' },
+  ], new Set(['uid-1']));
+
+  assert.equal(deleted, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(removed)), [{
+    calendarId: 'calendar-1',
+    eventId: 'remove',
+    options: { sendUpdates: 'none' },
+  }]);
 });
 
 test('the repository ICS parses to unique, recognized fixtures', () => {

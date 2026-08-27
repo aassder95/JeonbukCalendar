@@ -8,7 +8,7 @@
 - `apps-script/Code.gs`: Raw ICS를 읽어 Google Calendar의 `전북현대` 캘린더에 일정을 추가, 수정, 삭제하는 Apps Script 원본이다.
 - `apps-script/appsscript.json`: 시간대와 Google Calendar API v3 고급 서비스 설정이다.
 - `sync-calendar.cmd`: PowerShell 동기화 스크립트를 실행하고 성공 또는 실패 종료 코드를 반환한다.
-- `sync-calendar.ps1`: Apps Script API로 `syncJeonbuk`를 호출하고 추가, 수정, 삭제 건수를 검증한다.
+- `sync-calendar.ps1`: Apps Script API로 `syncJeonbuk`를 호출하고 추가, 수정, 변경 없음, 삭제 건수를 검증한다.
 - `.clasp.json.example`: 로컬 전용 `.clasp.json` 설정 예시다.
 - Raw ICS URL: `https://raw.githubusercontent.com/aassder95/JeonbukCalendar/main/jeonbuk.ics`
 
@@ -21,7 +21,7 @@
 1. `jeonbuk.ics`를 최신 일정으로 수정한다.
 2. 변경 내용을 GitHub `main` 브랜치에 푸시한다.
 3. 푸시가 끝나면 저장소 루트의 `sync-calendar.cmd`를 실행한다.
-4. 콘솔에 `전북현대 일정 동기화 완료`와 추가, 수정, 삭제 건수가 표시되는지 확인한다.
+4. 콘솔에 `전북현대 일정 동기화 완료`와 추가, 수정, 변경 없음, 삭제 건수가 표시되는지 확인한다.
 5. Google Calendar를 새로고침하여 변경된 일정을 확인한다.
 
 > GitHub에 푸시하는 것만으로 Google Calendar가 변경되지는 않는다. 푸시 후 반드시 `sync-calendar.cmd`를 더블클릭해야 캘린더에 반영된다.
@@ -41,7 +41,7 @@
    ```
 
 8. Apps Script 편집기에서 `배포` → `새 배포` → `API 실행 파일`을 선택하고 액세스 권한을 `나만`으로 배포한다.
-9. `sync-calendar.cmd`를 실행해 추가, 수정, 삭제 건수가 출력되는지 확인한다.
+9. `sync-calendar.cmd`를 실행해 추가, 수정, 변경 없음, 삭제 건수가 출력되는지 확인한다.
 
 OAuth 클라이언트 JSON, `.clasp.json`, clasp 인증 정보는 Git에 커밋하지 않는다. 예약 실행은 최초 로그인에서 저장된 OAuth 갱신 토큰을 재사용하므로 브라우저 선택이나 로그인 입력을 요구하지 않는다.
 
@@ -51,7 +51,7 @@ Apps Script API는 배포된 버전을 실행한다. `apps-script/Code.gs` 또�
 
 ### 로컬 검증
 
-Apps Script 코드를 변경한 뒤 아래 명령으로 ICS 파싱, 날짜 변환, UID 검증, 대회 라벨 판정 테스트를 실행한다.
+Apps Script 코드를 변경한 뒤 아래 명령으로 ICS 파싱, 날짜 변환, UID 검증, 일정 비교, 대회 라벨 판정 테스트를 실행한다.
 
 ```powershell
 npm test
@@ -75,7 +75,7 @@ npm test
 ## 일정 식별과 갱신
 
 - 각 일정은 ICS의 `UID`로 식별한다.
-- 기존 `UID`가 있으면 제목, 장소, 설명, 시작 및 종료 시간, 라벨을 수정한다.
+- 기존 `UID`가 있으면 제목, 장소, 설명, 시작 및 종료 시간, 라벨, 관리 표식을 비교하고 달라진 경우에만 수정한다.
 - 새로운 `UID`이면 새 일정을 추가한다.
 - 기존 일정의 `UID`를 바꾸면 중복 일정이 생길 수 있으므로 같은 경기는 기존 `UID`를 유지한다.
 - ICS에 `DESCRIPTION`이 없으면 기존 Google Calendar 메모를 삭제한다.

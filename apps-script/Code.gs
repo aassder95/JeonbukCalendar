@@ -2,6 +2,7 @@ const CONFIG = {
   calendarName: '전북현대',
   icsUrl: 'https://raw.githubusercontent.com/aassder95/JeonbukCalendar/main/jeonbuk.ics',
   timeZone: 'Asia/Seoul',
+  timeZoneOffset: '+09:00',
   managedPropertyName: 'jeonbukCalendarManaged',
   managedPropertyValue: 'true',
   labelNames: [
@@ -25,6 +26,7 @@ function syncJeonbuk() {
 
   let created = 0;
   let updated = 0;
+  let unchanged = 0;
 
   for (const fixture of fixtures) {
     const labelName = findLabelName(`${fixture.summary}\n${fixture.description}`);
@@ -42,25 +44,78 @@ function syncJeonbuk() {
       },
     };
     const existing = managedEventsByUid.get(fixture.uid);
+    const result = syncManagedEvent(calendar.id, fixture.uid, event, existing);
 
-    if (existing) {
-      Calendar.Events.update(event, calendar.id, existing.id, {
-        eventLabelVersion: 1,
-        sendUpdates: 'none',
-      });
-      updated++;
-    } else {
-      event.iCalUID = fixture.uid;
-      Calendar.Events.import(event, calendar.id, {
-        eventLabelVersion: 1,
-      });
-      created++;
-    }
+    if (result === 'created') created++;
+    if (result === 'updated') updated++;
+    if (result === 'unchanged') unchanged++;
   }
 
   const deleted = deleteStaleEvents(calendar.id, managedEvents, currentUids);
-  console.log(`동기화 완료: 추가 ${created}건, 수정 ${updated}건, 삭제 ${deleted}건`);
-  return { created, updated, deleted };
+  console.log(`동기화 완료: 추가 ${created}건, 수정 ${updated}건, 변경 없음 ${unchanged}건, 삭제 ${deleted}건`);
+  return { created, updated, unchanged, deleted };
+}
+
+function syncManagedEvent(calendarId, uid, event, existing) {
+  if (!existing) {
+    event.iCalUID = uid;
+    Calendar.Events.import(event, calendarId, {
+      eventLabelVersion: 1,
+    });
+    return 'created';
+  }
+
+  if (areManagedEventsEqual(existing, event)) return 'unchanged';
+
+  Calendar.Events.update(event, calendarId, existing.id, {
+    eventLabelVersion: 1,
+    sendUpdates: 'none',
+  });
+  return 'updated';
+}
+
+function areManagedEventsEqual(existing, expected) {
+  return existing.summary === expected.summary
+    && normalizeOptionalText(existing.location) === normalizeOptionalText(expected.location)
+    && normalizeOptionalText(existing.description) === normalizeOptionalText(expected.description)
+    && areEventDatesEqual(existing.start, expected.start)
+    && areEventDatesEqual(existing.end, expected.end)
+    && existing.eventLabelId === expected.eventLabelId
+    && getManagedProperty(existing) === getManagedProperty(expected);
+}
+
+function normalizeOptionalText(value) {
+  return value ?? '';
+}
+
+function areEventDatesEqual(existing, expected) {
+  if (!existing || !expected) return existing === expected;
+
+  const existingIsAllDay = typeof existing.date === 'string';
+  const expectedIsAllDay = typeof expected.date === 'string';
+  if (existingIsAllDay || expectedIsAllDay) {
+    return existingIsAllDay && expectedIsAllDay && existing.date === expected.date;
+  }
+
+  if (typeof existing.dateTime !== 'string' || typeof expected.dateTime !== 'string') return false;
+  const existingTime = parseEventDateTime(existing);
+  const expectedTime = parseEventDateTime(expected);
+  if (Number.isNaN(existingTime) || Number.isNaN(expectedTime)) {
+    return existing.dateTime === expected.dateTime && existing.timeZone === expected.timeZone;
+  }
+  return existingTime === expectedTime;
+}
+
+function parseEventDateTime(value) {
+  const hasOffset = /(?:Z|[+-]\d{2}:\d{2})$/.test(value.dateTime);
+  const dateTime = !hasOffset && value.timeZone === CONFIG.timeZone
+    ? `${value.dateTime}${CONFIG.timeZoneOffset}`
+    : value.dateTime;
+  return Date.parse(dateTime);
+}
+
+function getManagedProperty(event) {
+  return event.extendedProperties?.private?.[CONFIG.managedPropertyName];
 }
 
 function listManagedEvents(calendarId) {
