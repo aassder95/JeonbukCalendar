@@ -238,6 +238,254 @@ test('syncManagedEvent skips equal events and writes only created or changed eve
   assert.equal(calls[1].eventId, 'event-1');
 });
 
+test('installDailyTrigger replaces duplicate sync triggers and creates the daily trigger', () => {
+  const calls = [];
+  const duplicateTrigger = { getHandlerFunction: () => 'syncJeonbuk' };
+  const otherTrigger = { getHandlerFunction: () => 'otherHandler' };
+  const builder = {
+    timeBased() {
+      calls.push(['timeBased']);
+      return this;
+    },
+    everyDays(days) {
+      calls.push(['everyDays', days]);
+      return this;
+    },
+    atHour(hour) {
+      calls.push(['atHour', hour]);
+      return this;
+    },
+    create() {
+      calls.push(['create']);
+    },
+  };
+  context.ScriptApp = {
+    getProjectTriggers: () => [duplicateTrigger, otherTrigger],
+    deleteTrigger: trigger => calls.push(['deleteTrigger', trigger]),
+    newTrigger(handler) {
+      calls.push(['newTrigger', handler]);
+      return builder;
+    },
+  };
+
+  getFunction('installDailyTrigger')();
+
+  assert.deepEqual(calls, [
+    ['deleteTrigger', duplicateTrigger],
+    ['newTrigger', 'syncJeonbuk'],
+    ['timeBased'],
+    ['everyDays', 1],
+    ['atHour', 6],
+    ['create'],
+  ]);
+});
+
+test('findTargetCalendar returns the single writable calendar with the configured name', () => {
+  const config = getFunction('CONFIG');
+  const expected = { id: 'calendar-1', summary: config.calendarName };
+  context.Calendar = {
+    CalendarList: {
+      list: () => ({ items: [
+        { id: 'other', summary: '다른 캘린더' },
+        expected,
+      ] }),
+    },
+  };
+
+  assert.equal(getFunction('findTargetCalendar')(), expected);
+});
+
+test('findTargetCalendar reports zero matching calendars', () => {
+  context.Calendar = {
+    CalendarList: {
+      list: () => ({ items: [] }),
+    },
+  };
+
+  assert.throws(
+    () => getFunction('findTargetCalendar')(),
+    error => error.message.includes('0'),
+  );
+});
+
+test('findTargetCalendar reports multiple matching calendars', () => {
+  const config = getFunction('CONFIG');
+  context.Calendar = {
+    CalendarList: {
+      list: () => ({ items: [
+        { id: 'calendar-1', summary: config.calendarName },
+        { id: 'calendar-2', summary: config.calendarName },
+      ] }),
+    },
+  };
+
+  assert.throws(
+    () => getFunction('findTargetCalendar')(),
+    error => error.message.includes('2'),
+  );
+});
+
+test('getLabelIds returns IDs for every configured label', () => {
+  const config = getFunction('CONFIG');
+  context.Calendar = {
+    Calendars: {
+      get: calendarId => {
+        assert.equal(calendarId, 'calendar-1');
+        return {
+          labelProperties: {
+            eventLabels: config.labelNames.map((name, index) => ({ name, id: `label-${index + 1}` })),
+          },
+        };
+      },
+    },
+  };
+
+  const labelIds = getFunction('getLabelIds')('calendar-1');
+
+  for (const [index, name] of config.labelNames.entries()) {
+    assert.equal(labelIds[name], `label-${index + 1}`);
+  }
+});
+
+test('getLabelIds reports configured labels missing from the calendar', () => {
+  const config = getFunction('CONFIG');
+  context.Calendar = {
+    Calendars: {
+      get: () => ({
+        labelProperties: {
+          eventLabels: config.labelNames.slice(0, -1).map((name, index) => ({
+            name,
+            id: `label-${index + 1}`,
+          })),
+        },
+      }),
+    },
+  };
+
+  assert.throws(
+    () => getFunction('getLabelIds')('calendar-1'),
+    error => error.message.includes(config.labelNames.at(-1)),
+  );
+});
+
+test('syncJeonbuk orchestrates created, updated, unchanged, and deleted events', () => {
+  const config = getFunction('CONFIG');
+  const summaryPrefix = config.labelNames[0];
+  const ics = makeCalendar([
+    ...makeEvent({
+      uid: 'created@example.com',
+      summary: `[${summaryPrefix} R1] 신규 경기`,
+      description: `${config.labelNames[1]} 관련 안내`,
+    }),
+    ...makeEvent({
+      uid: 'unchanged@example.com',
+      summary: `[${summaryPrefix} R2] 동일 경기`,
+      description: '동일 설명',
+    }),
+    ...makeEvent({
+      uid: 'updated@example.com',
+      summary: `[${summaryPrefix} R3] 변경 경기`,
+      description: '변경 설명',
+    }),
+  ]);
+  const fixtures = getFunction('parseIcs')(ics);
+  const fixtureByUid = new Map(fixtures.map(fixture => [fixture.uid, fixture]));
+  const toManagedEvent = (uid, overrides = {}) => {
+    const fixture = fixtureByUid.get(uid);
+    return {
+      id: `event-${uid}`,
+      iCalUID: uid,
+      summary: fixture.summary,
+      location: fixture.location,
+      description: fixture.description || null,
+      start: fixture.start,
+      end: fixture.end,
+      eventLabelId: 'label-1',
+      extendedProperties: {
+        private: {
+          jeonbukCalendarManaged: 'true',
+        },
+      },
+      ...overrides,
+    };
+  };
+  const managedEvents = [
+    toManagedEvent('unchanged@example.com'),
+    toManagedEvent('updated@example.com', { location: '이전 장소' }),
+    {
+      ...toManagedEvent('unchanged@example.com'),
+      id: 'event-stale',
+      iCalUID: 'stale@example.com',
+    },
+  ];
+  const calls = [];
+  const lock = {
+    tryLock(timeout) {
+      calls.push(['tryLock', timeout]);
+      return true;
+    },
+    releaseLock() {
+      calls.push(['releaseLock']);
+    },
+  };
+  context.LockService = { getScriptLock: () => lock };
+  context.UrlFetchApp = {
+    fetch(url) {
+      calls.push(['fetch', url]);
+      return {
+        getContentText(encoding) {
+          calls.push(['getContentText', encoding]);
+          return ics;
+        },
+      };
+    },
+  };
+  context.Calendar = {
+    CalendarList: {
+      list: () => ({ items: [{ id: 'calendar-1', summary: config.calendarName }] }),
+    },
+    Calendars: {
+      get: () => ({
+        labelProperties: {
+          eventLabels: config.labelNames.map((name, index) => ({ name, id: `label-${index + 1}` })),
+        },
+      }),
+    },
+    Events: {
+      list(calendarId, options) {
+        calls.push(['list', calendarId, options]);
+        return { items: managedEvents };
+      },
+      import(event, calendarId, options) {
+        calls.push(['import', event, calendarId, options]);
+      },
+      update(event, calendarId, eventId, options) {
+        calls.push(['update', event, calendarId, eventId, options]);
+      },
+      remove(calendarId, eventId, options) {
+        calls.push(['remove', calendarId, eventId, options]);
+      },
+    },
+  };
+
+  const result = getFunction('syncJeonbuk')();
+
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), {
+    created: 1,
+    updated: 1,
+    unchanged: 1,
+    deleted: 1,
+  });
+  assert.equal(calls.filter(([method]) => method === 'import').length, 1);
+  assert.equal(calls.filter(([method]) => method === 'update').length, 1);
+  assert.equal(calls.filter(([method]) => method === 'remove').length, 1);
+  assert.equal(calls.find(([method]) => method === 'import')[1].eventLabelId, 'label-1');
+  assert.deepEqual(calls.filter(([method]) => method === 'tryLock' || method === 'releaseLock'), [
+    ['tryLock', 0],
+    ['releaseLock'],
+  ]);
+});
+
 test('listManagedEvents follows page tokens and filters by the management marker', () => {
   const requests = [];
   context.Calendar = {
@@ -290,6 +538,6 @@ test('the repository ICS parses to unique, recognized fixtures', () => {
   assert.ok(fixtures.length > 0);
   assert.equal(new Set(fixtures.map(fixture => fixture.uid)).size, fixtures.length);
   for (const fixture of fixtures) {
-    assert.doesNotThrow(() => findLabelName(`${fixture.summary}\n${fixture.description}`));
+    assert.doesNotThrow(() => findLabelName(fixture.summary));
   }
 });
