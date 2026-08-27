@@ -4,3 +4,4 @@ apps-script-web-app-url.txt
 client_secret*.json
 oauth-client*.json
 node_modules/
+sync-log.txt

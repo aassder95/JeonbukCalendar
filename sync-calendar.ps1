@@ -8,6 +8,23 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = $PSScriptRoot
 $claspScript = Join-Path $repoRoot 'node_modules\@google\clasp\build\src\index.js'
 $claspProject = Join-Path $repoRoot '.clasp.json'
+$syncLogPath = Join-Path $repoRoot 'sync-log.txt'
+
+function Add-SyncLogEntry {
+  param(
+    [Parameter(Mandatory)]
+    [string]$Status,
+
+    [Parameter(Mandatory)]
+    [string]$Details
+  )
+
+  $timestamp = (Get-Date).ToString('yyyy-MM-ddTHH:mm:sszzz')
+  $singleLineDetails = $Details -replace '[\r\n]+', ' '
+  Add-Content -LiteralPath $syncLogPath -Value "$timestamp status=$Status $singleLineDetails" -Encoding UTF8
+}
+
+try {
 
 if (-not (Test-Path -LiteralPath $claspScript -PathType Leaf)) {
   throw "clasp를 찾을 수 없습니다. 저장소에서 'npm ci'를 먼저 실행하세요."
@@ -81,3 +98,13 @@ Write-Output "추가 $($result.created)건"
 Write-Output "수정 $($result.updated)건"
 Write-Output "변경 없음 $($result.unchanged)건"
 Write-Output "삭제 $($result.deleted)건"
+Add-SyncLogEntry -Status 'success' -Details "created=$($result.created) updated=$($result.updated) unchanged=$($result.unchanged) deleted=$($result.deleted)"
+} catch {
+  $syncError = $_
+  try {
+    Add-SyncLogEntry -Status 'failed' -Details "error=$($syncError.Exception.Message)"
+  } catch {
+    Write-Warning "동기화 실패 이력을 기록하지 못했습니다: $($_.Exception.Message)"
+  }
+  throw $syncError
+}
