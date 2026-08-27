@@ -12,6 +12,7 @@
 - `sync-calendar.cmd`: PowerShell 동기화 스크립트를 실행하고 성공 또는 실패 종료 코드를 반환한다.
 - `sync-calendar.ps1`: Apps Script API로 `syncJeonbuk`를 호출하고 추가, 수정, 변경 없음, 삭제 건수를 검증한다.
 - `.clasp.json.example`: 로컬 전용 `.clasp.json` 설정 예시다.
+- `sync-log.txt`: `sync-calendar.ps1` 실행 이력을 남기는 로컬 전용 파일이다. 저장소 루트에 실행 시 자동 생성되며 Git에 커밋되지 않는다.
 - Raw ICS URL: `https://raw.githubusercontent.com/aassder95/JeonbukCalendar/main/jeonbuk.ics`
 
 이 저장소의 `apps-script/Code.gs`를 Apps Script 웹 편집기의 `Code.gs`와 동일하게 유지한다. 일정 데이터만 바꿀 때는 `jeonbuk.ics`만 수정하면 된다.
@@ -27,6 +28,8 @@
 5. Google Calendar를 새로고침하여 변경된 일정을 확인한다.
 
 > GitHub에 푸시하는 것만으로 Google Calendar가 변경되지는 않는다. 푸시 후 반드시 `sync-calendar.cmd`를 더블클릭해야 캘린더에 반영된다.
+
+`sync-calendar.ps1`은 실행할 때마다 시각과 결과를 저장소 루트의 `sync-log.txt`에 한 줄씩 추가한다(성공 시 `status=success created=... updated=... unchanged=... deleted=...`, 실패 시 `status=failed error=...` 형식). 이 파일은 로컬 실행 이력 확인용이며 Git에는 커밋되지 않는다. 로그 기록 자체가 실패해도 콘솔 출력과 종료 코드는 실제 동기화 성공/실패만 따른다.
 
 ### 명령줄 동기화 최초 설정
 

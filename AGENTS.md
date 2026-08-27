@@ -45,6 +45,7 @@ sync-calendar.cmd
 - `apps-script/appsscript.json`: V8 런타임, 시간대, Calendar 고급 서비스, OAuth 범위, 실행 API 설정
 - `sync-calendar.ps1`: 로컬 OAuth 인증을 재사용해 배포된 `syncJeonbuk`를 호출하고 응답 형식을 검증
 - `sync-calendar.cmd`: Windows에서 PowerShell 실행 정책을 우회해 위 스크립트를 실행하는 진입점
+- `sync-log.txt`: `sync-calendar.ps1` 실행마다 시각과 결과(성공 시 건수, 실패 시 오류 메시지)를 한 줄씩 append하는 로컬 전용 실행 이력. 저장소 루트에 실행 시 자동 생성되며 `.gitignore`에 포함되어 커밋되지 않는다. 이 파일 기록 실패는 보조 기능 실패일 뿐이므로 실제 동기화 성공 여부나 스크립트 종료 코드에 영향을 주면 안 된다.
 - `test/code.test.js`: Node VM에서 Apps Script의 순수 로직과 저장소 ICS를 검증하는 정적 테스트
 - `.clasp.json.example`: 비밀값이 없는 로컬 설정 예시
 - `docs/`: OAuth 동의 화면에 사용하는 공개 안내·개인정보 문서
