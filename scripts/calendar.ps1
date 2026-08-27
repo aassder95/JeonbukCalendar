@@ -122,7 +122,7 @@ if (-not (Test-Path -LiteralPath $claspScript -PathType Leaf)) {
 
 Push-Location $repoRoot
 try {
-  & node $claspScript --project $claspProject push
+  & node $claspScript --project $claspProject push --force
   if ($LASTEXITCODE -ne 0) { throw 'Apps Script 소스 반영이 실패했습니다.' }
 
   $versionOutput = & node $claspScript --project $claspProject --json version "JeonbukCalendar $(Get-LocalSourceVersion)"
