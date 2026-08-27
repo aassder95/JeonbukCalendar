@@ -2,6 +2,8 @@
 
 전북현대의 경기 일정을 Google Calendar에 동기화하기 위한 ICS 저장소다.
 
+구현 구조, AI 작업 규칙, 검증·배포 안전 경계는 [`AGENTS.md`](./AGENTS.md)를 따른다.
+
 ## 구조
 
 - `jeonbuk.ics`: 일정 원본. GitHub의 같은 파일을 갱신하고 Apps Script를 실행한다.
@@ -54,8 +56,10 @@ Apps Script API는 배포된 버전을 실행한다. `apps-script/Code.gs` 또�
 Apps Script 코드를 변경한 뒤 아래 명령으로 ICS 파싱, 날짜 변환, UID 검증, 일정 비교, 대회 라벨 판정 테스트를 실행한다.
 
 ```powershell
-npm test
+npm.cmd test
 ```
+
+Windows PowerShell 실행 정책이 `npm.ps1`을 차단할 수 있으므로 `npm.cmd test`를 사용한다. 이 테스트는 로컬 코드와 ICS를 검증하며, Apps Script 배포나 실제 Google Calendar 동기화까지 증명하지는 않는다.
 
 ## 업데이트 운영 규칙
 
