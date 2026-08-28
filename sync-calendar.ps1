@@ -21,6 +21,9 @@ $repoRoot = $PSScriptRoot
 $claspScript = Join-Path $repoRoot 'node_modules\@google\clasp\build\src\index.js'
 $claspProject = Join-Path $repoRoot '.clasp.json'
 $syncLogPath = Join-Path $repoRoot 'sync-log.txt'
+$syncStatePath = Join-Path $repoRoot '.sync-state.json'
+$syncStateScript = Join-Path $repoRoot 'scripts\sync-state.ps1'
+. $syncStateScript
 
 function Add-SyncLogEntry {
   param(
@@ -172,6 +175,8 @@ if ($preview.requiresDeleteConfirmation -and -not $AllowLargeDelete) {
 $approvedHash = if ($ExpectedIcsHash) { $ExpectedIcsHash } else { $preview.icsHash }
 $result = Invoke-ClaspFunction -FunctionName 'applyJeonbuk' -Parameters @($approvedHash, [bool]$AllowLargeDelete)
 Assert-SyncCounts -Result $result
+$originMainCommit = Get-OriginMainCommit -RepoRoot $repoRoot
+Write-SyncStateFile -SyncStatePath $syncStatePath -CommitSha $originMainCommit -Result $result
 
 if ($Json) {
   $result | ConvertTo-Json -Depth 10

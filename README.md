@@ -15,6 +15,7 @@
 - `scripts/calendar.ps1`: `calendar.cmd`의 실제 운영 로직이다.
 - `.clasp.json.example`: 로컬 전용 `.clasp.json` 설정 예시다.
 - `sync-log.txt`: `sync-calendar.ps1` 실행 이력을 남기는 로컬 전용 파일이다. 저장소 루트에 실행 시 자동 생성되며 Git에 커밋되지 않는다.
+- `.sync-state.json`: 마지막으로 Google Calendar 동기화에 성공한 `origin/main` commit과 시각, ICS 해시, 배포 소스 버전을 기록하는 로컬 전용 상태 파일이다. 성공한 `Sync` 실행에서만 원자적으로 갱신되며 Git에 커밋되지 않는다.
 - Raw ICS URL: `https://raw.githubusercontent.com/aassder95/JeonbukCalendar/main/jeonbuk.ics`
 
 이 저장소의 `apps-script/Code.gs`를 Apps Script 웹 편집기의 `Code.gs`와 동일하게 유지한다. 일정 데이터만 바꿀 때는 `jeonbuk.ics`만 수정하면 된다.
@@ -52,6 +53,8 @@ calendar.cmd Deploy -DeploymentId "기존_API_실행_파일_ID"
 - 각 읽기·실행 명령은 `-Json`을 지원해 AI가 구조화된 결과를 받을 수 있다.
 
 `sync-calendar.ps1`은 실행할 때마다 시각과 결과를 저장소 루트의 `sync-log.txt`에 한 줄씩 추가한다(성공 시 `status=success created=... updated=... unchanged=... deleted=...`, 실패 시 `status=failed error=...` 형식). 이 파일은 로컬 실행 이력 확인용이며 Git에는 커밋되지 않는다. 로그 기록 자체가 실패해도 콘솔 출력과 종료 코드는 실제 동기화 성공/실패만 따른다.
+
+성공한 동기화는 `.sync-state.json`의 `lastSyncedCommit`을 현재 `origin/main` SHA로 갱신한다. 자동화는 실행 전에 원격 `main`을 fetch하고 이 값과 비교하여, GitHub에는 반영됐지만 Google Calendar 동기화가 끝나지 않은 commit을 먼저 따라잡는다. 미리보기, 실패한 동기화, 잘못된 SHA 또는 결과 응답은 기존 상태 파일을 변경하지 않는다.
 
 ### 명령줄 동기화 최초 설정
 

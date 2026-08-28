@@ -53,6 +53,7 @@ calendar.cmd
 - `calendar.cmd`: 검증, 미리보기, 상태, 동기화, 배포를 한 진입점에서 실행하는 AI·사용자용 도구
 - `scripts/calendar.ps1`: 로컬 검증, 배포 버전 비교, 명시적 Apps Script 배포를 담당하는 운영 스크립트
 - `sync-log.txt`: `sync-calendar.ps1` 실행마다 시각과 결과(성공 시 건수, 실패 시 오류 메시지)를 한 줄씩 append하는 로컬 전용 실행 이력. 저장소 루트에 실행 시 자동 생성되며 `.gitignore`에 포함되어 커밋되지 않는다. 이 파일 기록 실패는 보조 기능 실패일 뿐이므로 실제 동기화 성공 여부나 스크립트 종료 코드에 영향을 주면 안 된다.
+- `.sync-state.json`: 마지막 Google Calendar 동기화 성공의 `origin/main` SHA, 시각, ICS 해시, 배포 소스 버전을 저장하는 로컬 전용 상태. 성공한 `Sync`에서만 임시 파일을 거쳐 원자적으로 교체하며 `.gitignore`에 포함한다. 상태 기록 실패는 동기화 명령 실패로 보고하되 Calendar API에 이미 반영된 범위를 구분하고, 다음 실행에서 동일 commit을 안전하게 재검증한다.
 - `test/code.test.js`: Node VM에서 Apps Script의 순수 로직과 저장소 ICS를 검증하는 정적 테스트
 - `.clasp.json.example`: 비밀값이 없는 로컬 설정 예시
 - `docs/`: OAuth 동의 화면에 사용하는 공개 안내·개인정보 문서
@@ -97,6 +98,7 @@ calendar.cmd
 - 자동 트리거 설치 함수는 제거되어 있으며 별도 요청 없이 다시 추가하거나 자동 트리거를 설치하지 않는다.
 - 배포된 Apps Script API는 저장소 파일이 아니라 배포 버전을 실행한다. 소스 변경 뒤 실제 동기화를 요구받았다면 웹 편집기 반영과 API 실행 파일 새 버전 배포 여부를 따로 확인한다.
 - `apps-script/Code.gs`를 변경할 때 `CONFIG.sourceVersion`도 갱신하고 `calendar.cmd Status`로 배포 버전과 비교한다.
+- 자동화가 catch-up 여부를 판정하기 전에 비대화식으로 `origin/main`을 fetch하고 `.sync-state.json`의 `lastSyncedCommit`과 비교한다. 상태 파일이 없으면 최초 실행으로 취급한다.
 
 ## 공식 경기 결과 자동 반영 시 안전 절차
 

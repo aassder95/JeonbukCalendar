@@ -5,3 +5,4 @@ client_secret*.json
 oauth-client*.json
 node_modules/
 sync-log.txt
+.sync-state.json*
